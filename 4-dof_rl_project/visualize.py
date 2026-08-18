@@ -14,7 +14,7 @@ import matplotlib.animation as animation
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 
-from robot_arm_env import RobotArmEnv, L1, L2, L3
+from robot_arm_env import RobotArmEnv, L1, L2, L3, forward_kinematics
 
 
 # ── Configuration ─────────────────────────────────────────────
@@ -69,29 +69,30 @@ def get_joint_positions(angles_deg: np.ndarray) -> tuple:
 
 # ── Episode recording ─────────────────────────────────────────
 def record_episode(model: PPO, env: Monitor) -> list[dict]:
-    """
-    Run one episode with the trained model and record each step.
-
-    Args:
-        model: trained PPO model
-        env:   wrapped RobotArmEnv
-
-    Returns:
-        List of dicts with keys: angles, target, tip
-    """
     obs, _ = env.reset()
     done   = False
     frames = []
+
+    # Record starting position
+    start_angles = env.env._angles.copy()
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
         obs, _, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
+    # Interpolate between start and final position over 30 frames
+    end_angles = env.env._angles.copy()
+    target     = env.env._target.copy()
+
+    for i in range(30):
+        t = i / 29.0  # 0.0 → 1.0
+        interp_angles = start_angles + t * (end_angles - start_angles)
+        tip = forward_kinematics(interp_angles)
         frames.append({
-            "angles": env.env._angles.copy(),
-            "target": env.env._target.copy(),
-            "tip":    info["tip_position"].copy(),
+            "angles": interp_angles,
+            "target": target,
+            "tip":    tip,
         })
 
     return frames
