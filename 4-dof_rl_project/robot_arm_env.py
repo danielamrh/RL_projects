@@ -27,6 +27,11 @@ JOINT_MAX = np.array([180.0, 150.0, 150.0, 120.0])
 HOME      = np.array([90.0,  90.0,  90.0,  90.0])
 
 
+GRAVITY = 9.81  # m/s², standard gravity for simulating accelerometer readings
+ACCEL_NOISE_STD = 0.05  # m/s², standard deviation of accelerometer noise
+GYRO_NOISE_STD  = 0.01  # rad/s, standard deviation of gyroscope noise
+DT = 0.02  # seconds, time step for simulation
+
 def forward_kinematics(angles_deg: np.ndarray) -> np.ndarray:
     """
     Compute the 3D position (x, y, z) of the gripper tip in cm.
@@ -61,6 +66,38 @@ def forward_kinematics(angles_deg: np.ndarray) -> np.ndarray:
     y = r * np.sin(base_rad)
 
     return np.array([x, y, z], dtype=np.float32)
+
+def simulate_imu(angles_deg: np.ndarray, prev_angles_deg: np.ndarray) -> np.ndarray:
+    """
+    Simulate IMU readings (accelerometer + gyroscope) from joint angles.
+
+    Computes angular velocity from angle changes and adds realistic
+    sensor noise to mimic a real MPU-6050.
+
+    Args:
+        angles_deg:      current joint angles in degrees
+        prev_angles_deg: joint angles from previous timestep
+
+    Returns:
+        np.ndarray: [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
+    """
+    # Compute gripper tip positions
+    tip_current  = forward_kinematics(angles_deg)
+    tip_previous = forward_kinematics(prev_angles_deg)
+
+    # Approximate linear acceleration (cm/s² → m/s²) + gravity on Z
+    accel = (tip_current - tip_previous) / (DT * 100.0)
+    accel[2] += GRAVITY
+
+    # Approximate angular velocity from angle changes (deg/s → rad/s)
+    delta_angles = np.radians(angles_deg[:3] - prev_angles_deg[:3])
+    gyro = delta_angles / DT
+
+    # Add sensor noise
+    accel += np.random.normal(0, ACCEL_NOISE_STD, size=3)
+    gyro  += np.random.normal(0, GYRO_NOISE_STD,  size=3)
+
+    return np.concatenate([accel, gyro]).astype(np.float32)
 
 
 class RobotArmEnv(gym.Env):
@@ -97,15 +134,17 @@ class RobotArmEnv(gym.Env):
         )
 
         # ── Observation space ─────────────────────────────────────────
-        # [3 normalized angles] + [3 tip position] + [3 target position]
-        obs_low  = np.array([-1, -1, -1, -30, -30,  0, -30, -30,  0], dtype=np.float32)
-        obs_high = np.array([ 1,  1,  1,  30,  30, 30,  30,  30, 30], dtype=np.float32)
+        # [3 normalized angles] + [3 tip position] + [3 target position] + [6 IMU readings]
+        obs_low  = np.array([-1, -1, -1, -30, -30,  0, -30, -30,  0, -50, -50, -50, -10, -10, -10], dtype=np.float32)
+        obs_high = np.array([ 1,  1,  1,  30,  30, 30,  30,  30, 30,  50,  50,  50,  10,  10,  10], dtype=np.float32)
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         # Internal state
-        self._angles  = HOME.copy()     # current joint angles [deg]
         self._target  = np.zeros(3)     # target position [cm]
         self._steps   = 0
+
+        # Previous angles for IMU simulation 
+        self._prev_angles = HOME.copy()
 
     # ── Helpers ───────────────────────────────────────────────────────
 
@@ -118,9 +157,10 @@ class RobotArmEnv(gym.Env):
         return JOINT_MIN[:3] + (action + 1.0) / 2.0 * (JOINT_MAX[:3] - JOINT_MIN[:3])
 
     def _get_obs(self) -> np.ndarray:
-        tip = forward_kinematics(self._angles)
+        tip         = forward_kinematics(self._angles)
         angles_norm = self._normalize_angle(self._angles[:3])
-        return np.concatenate([angles_norm, tip, self._target], dtype=np.float32)
+        imu         = simulate_imu(self._angles, self._prev_angles)
+        return np.concatenate([angles_norm, tip, self._target, imu], dtype=np.float32)
 
     def _random_target(self) -> np.ndarray:
         """Sample a reachable target position."""
@@ -149,10 +189,15 @@ class RobotArmEnv(gym.Env):
         self._target = self._random_target()
         self._steps  = 0
 
+        self._prev_angles = self._angles.copy()
+
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
         self._steps += 1
+
+        # Save previous angles before moving
+        self._prev_angles = self._angles.copy()
 
         # Apply action: set joint angles directly
         new_angles_deg = self._denormalize_action(np.clip(action, -1.0, 1.0))
