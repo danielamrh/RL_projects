@@ -122,6 +122,7 @@ class RobotArmEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
     SUCCESS_THRESHOLD = 2.0   # cm — gripper within 2cm of target = success
+    MAX_COLLISIONS    = 10    # max allowed collisions before episode ends
     MAX_STEPS         = 200
 
     def __init__(self, render_mode=None):
@@ -141,8 +142,9 @@ class RobotArmEnv(gym.Env):
 
         # Internal state
         self._angles  = HOME.copy()  # current joint angles [deg]
-        self._target  = np.zeros(3)     # target position [cm]
+        self._target  = np.zeros(3)  # target position [cm]
         self._steps   = 0
+        self._collisions_count = 0
 
         # Previous angles for IMU simulation 
         self._prev_angles = HOME.copy()
@@ -320,6 +322,7 @@ class RobotArmEnv(gym.Env):
 
         self._target = self._random_target()
         self._steps  = 0
+        self._collisions_count = 0
 
         self._prev_angles = self._angles.copy()
 
@@ -345,12 +348,13 @@ class RobotArmEnv(gym.Env):
 
         if collision:
             reward -= 10.0
+            self._collisions_count += 1
 
         success = distance < self.SUCCESS_THRESHOLD and not collision
         if success:
             reward += 100.0
 
-        terminated = success 
+        terminated = success or self._collisions_count >= self.MAX_COLLISIONS
         truncated  = self._steps >= self.MAX_STEPS
 
         info = {
@@ -362,6 +366,7 @@ class RobotArmEnv(gym.Env):
             "base_collision":   base_collision,
             "tip_position":     tip,
             "target_position":  self._target,
+            "collisions":       self._collisions_count,
         }
 
         return self._get_obs(), reward, terminated, truncated, info

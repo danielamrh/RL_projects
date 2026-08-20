@@ -24,7 +24,7 @@ from robot_arm_env import RobotArmEnv
 
 # ── Configuration ─────────────────────────────────────────────
 NUM_ENVS        = 8
-TOTAL_TIMESTEPS = 1_000_000
+TOTAL_TIMESTEPS = 2_000_000
 
 LOG_DIR         = "logs/"
 CHECKPOINT_DIR  = "checkpoints/"
