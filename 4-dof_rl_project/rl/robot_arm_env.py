@@ -140,6 +140,7 @@ class RobotArmEnv(gym.Env):
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         # Internal state
+        self._angles  = HOME.copy()  # current joint angles [deg]
         self._target  = np.zeros(3)     # target position [cm]
         self._steps   = 0
 
@@ -161,6 +162,137 @@ class RobotArmEnv(gym.Env):
         angles_norm = self._normalize_angle(self._angles[:3])
         imu         = simulate_imu(self._angles, self._prev_angles)
         return np.concatenate([angles_norm, tip, self._target, imu], dtype=np.float32)
+
+    def _get_joint_positions(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Compute 3D coordinates of all joints.
+
+        Returns:
+            p0: base origin [0, 0, 0]
+            p1: shoulder joint
+            p2: elbow joint
+            p3: gripper tip
+        """
+        base_rad     = np.radians(self._angles[0])
+        shoulder_rad = np.radians(self._angles[1])
+        elbow_rad    = np.radians(self._angles[2])
+
+        s = shoulder_rad - np.pi / 2
+        e = elbow_rad    - np.pi / 2
+
+        p0 = np.array([0.0, 0.0, 0.0])
+        p1 = np.array([0.0, 0.0, L1])
+
+        r2 = L2 * np.cos(s)
+        p2 = np.array([r2 * np.cos(base_rad), r2 * np.sin(base_rad), L1 + L2 * np.sin(s)])
+
+        r3 = L2 * np.cos(s) + L3 * np.cos(s + e)
+        p3 = np.array([r3 * np.cos(base_rad), r3 * np.sin(base_rad), L1 + L2 * np.sin(s) + L3 * np.sin(s + e)])
+
+        return p0, p1, p2, p3
+
+    def _check_ground_collision(self, p0: np.ndarray, p1: np.ndarray,
+                             p2: np.ndarray, p3: np.ndarray) -> bool:
+        """
+        Check if any joint has gone below the ground plane (z < 0).
+
+        Args:
+            p0, p1, p2, p3: 3D positions of base, shoulder, elbow, gripper
+
+        Returns:
+            True if a ground collision is detected
+        """
+        return any(p[2] < 0.0 for p in [p0, p1, p2, p3])
+    
+    @staticmethod
+    def _segment_to_segment_distance(p1: np.ndarray, p2: np.ndarray,
+                                    p3: np.ndarray, p4: np.ndarray) -> float:
+        """
+        Compute the minimum distance between two line segments in 3D.
+
+        Segment A: from p1 to p2
+        Segment B: from p3 to p4
+
+        Returns:
+            Minimum distance between the two segments
+        """
+        d1 = p2 - p1   # direction of segment A
+        d2 = p4 - p3   # direction of segment B
+        r  = p1 - p3
+
+        a = np.dot(d1, d1)
+        e = np.dot(d2, d2)
+        f = np.dot(d2, r)
+
+        if a < 1e-10 and e < 1e-10:   # both segments are points
+            return np.linalg.norm(r)
+
+        if a < 1e-10:                  # segment A is a point
+            s, t = 0.0, np.clip(f / e, 0.0, 1.0)
+        else:
+            c = np.dot(d1, r)
+            if e < 1e-10:              # segment B is a point
+                t, s = 0.0, np.clip(-c / a, 0.0, 1.0)
+            else:
+                b    = np.dot(d1, d2)
+                denom = a * e - b * b
+                if denom != 0.0:
+                    s = np.clip((b * f - c * e) / denom, 0.0, 1.0)
+                else:
+                    s = 0.0
+                t = (b * s + f) / e
+                if t < 0.0:
+                    t, s = 0.0, np.clip(-c / a, 0.0, 1.0)
+                elif t > 1.0:
+                    t, s = 1.0, np.clip((b - c) / a, 0.0, 1.0)
+
+        closest_a = p1 + s * d1
+        closest_b = p3 + t * d2
+        return np.linalg.norm(closest_a - closest_b)
+
+    def _check_self_collision(self, p0: np.ndarray, p1: np.ndarray,
+                            p2: np.ndarray, p3: np.ndarray) -> bool:
+        """
+        Check if non-adjacent arm segments are too close to each other.
+
+        Checks segment S0 (base column) against S2 (forearm),
+        since adjacent segments (S0-S1, S1-S2) always share a joint.
+
+        Args:
+            p0, p1, p2, p3: 3D positions of base, shoulder, elbow, gripper
+
+        Returns:
+            True if a self-collision is detected
+        """
+        arm_radius = 2.0   # cm — physical arm thickness / 2
+
+        dist_s0_s2 = self._segment_to_segment_distance(p0, p1, p2, p3)
+        return dist_s0_s2 < arm_radius
+
+    def _check_base_collision(self, p2: np.ndarray, p3: np.ndarray) -> bool:
+        """
+        Check if the forearm segment intersects the base cylinder.
+
+        The base is modeled as a vertical cylinder at the origin
+        with radius BASE_RADIUS and height L1.
+
+        Args:
+            p2: elbow joint position
+            p3: gripper tip position
+
+        Returns:
+            True if the forearm intersects the base cylinder
+        """
+        BASE_RADIUS = 3.0   # cm — physical base width / 2
+
+        # Sample points along the forearm segment and test each against
+        # the base cylinder (only check within cylinder height)
+        for t in np.linspace(0.0, 1.0, 20):
+            point = p2 + t * (p3 - p2)
+            if point[2] <= L1:                                    # within cylinder height
+                if np.sqrt(point[0]**2 + point[1]**2) < BASE_RADIUS:  # within cylinder radius
+                    return True
+        return False
 
     def _random_target(self) -> np.ndarray:
         """Sample a reachable target position."""
@@ -195,38 +327,41 @@ class RobotArmEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         self._steps += 1
-
-        # Save previous angles before moving
         self._prev_angles = self._angles.copy()
 
-        # Apply action: set joint angles directly
         new_angles_deg = self._denormalize_action(np.clip(action, -1.0, 1.0))
         self._angles[:3] = np.clip(new_angles_deg, JOINT_MIN[:3], JOINT_MAX[:3])
 
-        # Compute current gripper position
-        tip = forward_kinematics(self._angles)
+        p0, p1, p2, p3 = self._get_joint_positions()
+        tip = p3
 
-        # Distance to target
+        ground_collision = self._check_ground_collision(p0, p1, p2, p3)
+        self_collision   = self._check_self_collision(p0, p1, p2, p3)
+        base_collision   = self._check_base_collision(p2, p3)
+        collision        = ground_collision or self_collision or base_collision
+
         distance = np.linalg.norm(tip - self._target)
+        reward   = -distance * 0.1 - 0.1
 
-        # Reward
-        reward = -distance * 0.1          # distance penalty (scaled)
-        reward -= 0.1                     # time penalty
+        if collision:
+            reward -= 10.0
 
-        # Success
-        success = distance < self.SUCCESS_THRESHOLD
+        success = distance < self.SUCCESS_THRESHOLD and not collision
         if success:
             reward += 100.0
 
-        # Done
-        terminated = success
+        terminated = success 
         truncated  = self._steps >= self.MAX_STEPS
 
         info = {
-            "distance_cm": distance,
-            "success": success,
-            "tip_position": tip,
-            "target_position": self._target,
+            "distance_cm":      distance,
+            "success":          success,
+            "collision":        collision,
+            "ground_collision": ground_collision,
+            "self_collision":   self_collision,
+            "base_collision":   base_collision,
+            "tip_position":     tip,
+            "target_position":  self._target,
         }
 
         return self._get_obs(), reward, terminated, truncated, info
