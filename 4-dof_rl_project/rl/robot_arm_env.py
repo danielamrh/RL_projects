@@ -14,7 +14,7 @@ Task: Move the gripper to a random target position (reach task).
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-
+from matplotlib.path import Path
 
 # ── Robot geometry (measured in cm from assembled arm photos) ──
 L1 = 8.0    # height of shoulder joint above base
@@ -39,6 +39,16 @@ DT = 0.02  # seconds, time step for simulation
 CAMERA_POS_NOISE_STD = 0.5  # cm, standard deviation of camera position noise
 CAMERA_POSE_NOISE_STD = 2.0  # degrees, standard deviation of camera orientation noise
 
+# ── Physical workspace constraint (shoulder vs elbow) ─────────
+# Boundary polygon measured from physical robot (left=shoulder, right=elbow)
+_WORKSPACE_POINTS = np.array([
+    [0,145],[10,145],[20,150],[30,160],[40,160],[50,170],
+    [60,170],[70,180],[80,180],[90,130],[100,110],[110,110],
+    [120,80],[120,50],[110,50],[100,50],[90,50],[80,50],
+    [70,50],[60,50],[50,50],[40,50],[30,60],[20,70],
+    [10,80],[0,90],[0,145]
+], dtype=np.float32)
+_WORKSPACE_PATH = Path(_WORKSPACE_POINTS)
 
 def forward_kinematics(angles_deg: np.ndarray) -> np.ndarray:
     """
@@ -348,6 +358,21 @@ class RobotArmEnv(gym.Env):
                     return True
         return False
 
+    def _check_workspace_violation(self) -> bool:
+        """
+        Check if the shoulder/elbow combination exceeds physical workspace.
+
+        Uses a polygon boundary measured from the physical robot.
+        Shoulder servo maps to left axis (0-120), elbow to right axis (50-180).
+
+        Returns:
+            True if outside the physical workspace
+        """
+        # Map our joint angles to the workspace polygon coordinate system
+        shoulder = self._angles[1] - 30.0    # our 30-150° → polygon 0-120°
+        elbow    = self._angles[2] - 50.0    # our 50-180° → polygon 0-130°
+        return not _WORKSPACE_PATH.contains_point([shoulder, elbow])
+
     def _random_target(self) -> np.ndarray:
         """Sample a reachable target position."""
         while True:
@@ -395,7 +420,8 @@ class RobotArmEnv(gym.Env):
         ground_collision = self._check_ground_collision(p0, p1, p2, p3)
         self_collision   = self._check_self_collision(p0, p1, p2, p3)
         base_collision   = self._check_base_collision(p2, p3)
-        collision        = ground_collision or self_collision or base_collision
+        workspace_violation = self._check_workspace_violation()
+        collision = ground_collision or self_collision or base_collision or workspace_violation
 
         distance = np.linalg.norm(tip - self._target)
         reward   = -distance * 0.1 - 0.1
@@ -421,6 +447,7 @@ class RobotArmEnv(gym.Env):
             "tip_position":     tip,
             "target_position":  self._target,
             "collisions":       self._collisions_count,
+            "workspace_violation": workspace_violation,
         }
 
         return self._get_obs(), reward, terminated, truncated, info

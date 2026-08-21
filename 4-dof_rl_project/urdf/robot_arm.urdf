@@ -1,51 +1,73 @@
 <?xml version="1.0"?>
 <robot name="snam1500_arm">
 
-  <!-- ── Base ─────────────────────────────────────────────────── -->
+  <!-- ── Base plate (fixed to ground) ──────────────────────────── -->
   <link name="base_link">
     <visual>
+      <origin xyz="0 0 0.014"/>
       <geometry>
-        <cylinder length="0.08" radius="0.03"/>
+        <box size="0.07 0.07 0.028"/>
       </geometry>
-      <origin xyz="0 0 0.04"/>
     </visual>
   </link>
 
-  <!-- ── Joint 0: Base rotation (Z-axis) ──────────────────────── -->
+  <!-- ── Joint 0: Base rotation (Z-axis) ───────────────────────── -->
   <joint name="joint_base" type="revolute">
     <parent link="base_link"/>
-    <child link="shoulder_link"/>
-    <origin xyz="0 0 0.08"/>
+    <child link="rotating_base_link"/>
+    <origin xyz="0 0 0.028"/>
     <axis xyz="0 0 1"/>
     <limit lower="0" upper="3.1416" effort="1" velocity="1"/>
   </joint>
 
-  <!-- ── Shoulder ──────────────────────────────────────────────── -->
-  <link name="shoulder_link">
+  <!-- ── Rotating base (two side plates) ───────────────────────── -->
+  <link name="rotating_base_link">
+    <!-- left plate -->
     <visual>
+      <origin xyz="0 0.0285 0.026" rpy="0 0 0"/>
       <geometry>
-        <cylinder length="0.10" radius="0.015"/>
+        <box size="0.05 0.004 0.052"/>
       </geometry>
-      <origin xyz="0.05 0 0" rpy="0 1.5708 0"/>
+    </visual>
+    <!-- right plate -->
+    <visual>
+      <origin xyz="0 -0.0285 0.026" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.004 0.052"/>
+      </geometry>
+    </visual>
+    <!-- base plate -->
+    <visual>
+      <origin xyz="0 0 0.001" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.06 0.003"/>
+      </geometry>
     </visual>
   </link>
 
-  <!-- ── Joint 1: Shoulder (Y-axis) ───────────────────────────── -->
+  <!-- ── Joint 1: Shoulder (Y-axis) ────────────────────────────── -->
   <joint name="joint_shoulder" type="revolute">
-    <parent link="shoulder_link"/>
+    <parent link="rotating_base_link"/>
     <child link="upper_arm_link"/>
-    <origin xyz="0.10 0 0"/>
+    <origin xyz="0 0 0.052"/>
     <axis xyz="0 1 0"/>
     <limit lower="-1.0472" upper="1.0472" effort="1" velocity="1"/>
   </joint>
 
-  <!-- ── Upper Arm ─────────────────────────────────────────────── -->
+  <!-- ── Upper arm ──────────────────────────────────────────────── -->
   <link name="upper_arm_link">
     <visual>
-      <geometry>
-        <cylinder length="0.10" radius="0.015"/>
-      </geometry>
       <origin xyz="0.05 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder length="0.10" radius="0.008"/>
+      </geometry>
+    </visual>
+    <!-- elbow connector block -->
+    <visual>
+      <origin xyz="0.10 0 0"/>
+      <geometry>
+        <box size="0.02 0.03 0.02"/>
+      </geometry>
     </visual>
   </link>
 
@@ -61,10 +83,17 @@
   <!-- ── Forearm ───────────────────────────────────────────────── -->
   <link name="forearm_link">
     <visual>
-      <geometry>
-        <cylinder length="0.11" radius="0.012"/>
-      </geometry>
       <origin xyz="0.055 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder length="0.11" radius="0.007"/>
+      </geometry>
+    </visual>
+    <!-- gripper tip marker -->
+    <visual>
+      <origin xyz="0.11 0 0"/>
+      <geometry>
+        <sphere radius="0.010"/>
+      </geometry>
     </visual>
   </link>
 
