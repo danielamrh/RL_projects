@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<robot name="snam1500_arm">
+
+  <!-- ── Base ─────────────────────────────────────────────────── -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.08" radius="0.03"/>
+      </geometry>
+      <origin xyz="0 0 0.04"/>
+    </visual>
+  </link>
+
+  <!-- ── Joint 0: Base rotation (Z-axis) ──────────────────────── -->
+  <joint name="joint_base" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0 0 0.08"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="3.1416" effort="1" velocity="1"/>
+  </joint>
+
+  <!-- ── Shoulder ──────────────────────────────────────────────── -->
+  <link name="shoulder_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.10" radius="0.015"/>
+      </geometry>
+      <origin xyz="0.05 0 0" rpy="0 1.5708 0"/>
+    </visual>
+  </link>
+
+  <!-- ── Joint 1: Shoulder (Y-axis) ───────────────────────────── -->
+  <joint name="joint_shoulder" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0.10 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.0472" upper="1.0472" effort="1" velocity="1"/>
+  </joint>
+
+  <!-- ── Upper Arm ─────────────────────────────────────────────── -->
+  <link name="upper_arm_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.10" radius="0.015"/>
+      </geometry>
+      <origin xyz="0.05 0 0" rpy="0 1.5708 0"/>
+    </visual>
+  </link>
+
+  <!-- ── Joint 2: Elbow (Y-axis) ───────────────────────────────── -->
+  <joint name="joint_elbow" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0.10 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.0472" upper="1.0472" effort="1" velocity="1"/>
+  </joint>
+
+  <!-- ── Forearm ───────────────────────────────────────────────── -->
+  <link name="forearm_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.11" radius="0.012"/>
+      </geometry>
+      <origin xyz="0.055 0 0" rpy="0 1.5708 0"/>
+    </visual>
+  </link>
+
+</robot>

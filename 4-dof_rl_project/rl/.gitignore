@@ -1,6 +1,6 @@
 models/
 logs/
 checkpoints/
-*.gif
+
 *.mp4
 __pycache__/

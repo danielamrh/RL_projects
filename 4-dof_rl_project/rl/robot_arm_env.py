@@ -26,11 +26,18 @@ JOINT_MIN = np.array([0.0,  30.0,  30.0,  60.0])   # [base, shoulder, elbow, gri
 JOINT_MAX = np.array([180.0, 150.0, 150.0, 120.0])
 HOME      = np.array([90.0,  90.0,  90.0,  90.0])
 
+# ── Maximum joint angle change per step ─────────────────────────
+MAX_DELTA = 6
 
+# ── IMU simulation parameters ─────────────────────────────────
 GRAVITY = 9.81  # m/s², standard gravity for simulating accelerometer readings
 ACCEL_NOISE_STD = 0.05  # m/s², standard deviation of accelerometer noise
 GYRO_NOISE_STD  = 0.01  # rad/s, standard deviation of gyroscope noise
 DT = 0.02  # seconds, time step for simulation
+
+# ── Camera simulation parameters ───────────────────────────────
+CAMERA_POS_NOISE_STD = 0.5  # cm, standard deviation of camera position noise
+
 
 def forward_kinematics(angles_deg: np.ndarray) -> np.ndarray:
     """
@@ -99,15 +106,35 @@ def simulate_imu(angles_deg: np.ndarray, prev_angles_deg: np.ndarray) -> np.ndar
 
     return np.concatenate([accel, gyro]).astype(np.float32)
 
+def simulate_camera_target(target: np.ndarray) -> np.ndarray:
+    """
+    Simulate a camera-based target detection reading.
+
+    In simulation: returns the true target position plus realistic
+    noise to mimic a calibrated webcam detecting a colored object.
+    In real deployment: replace with actual OpenCV detection output.
+
+    Args:
+        target: true target position [x, y, z] in cm
+
+    Returns:
+        np.ndarray: noisy target position [x, y, z] in cm
+    """
+    noise = np.random.normal(0, CAMERA_POS_NOISE_STD, size=3).astype(np.float32)
+    return (target + noise).astype(np.float32)
+
 
 class RobotArmEnv(gym.Env):
     """
     Reach task: move the gripper as close as possible to a random target.
 
-    Observation (9 values):
-        [base_norm, shoulder_norm, elbow_norm,   # current joint angles normalized to [-1, 1]
-         tip_x, tip_y, tip_z,                    # current gripper position (cm)
-         target_x, target_y, target_z]           # target position (cm)
+    Observation (18 values):
+        [base_norm, shoulder_norm, elbow_norm,   # joint angles normalized to [-1, 1]
+         tip_x, tip_y, tip_z,                    # gripper position (cm)
+         target_x, target_y, target_z,           # true target position (cm)
+         accel_x, accel_y, accel_z,              # simulated accelerometer (m/s²)
+         gyro_x, gyro_y, gyro_z,                 # simulated gyroscope (rad/s)
+         cam_target_x, cam_target_y, cam_target_z]  # camera-detected target (cm)
 
     Action (3 values, continuous [-1, 1]):
         Desired joint angles for [base, shoulder, elbow], normalized.
@@ -123,7 +150,7 @@ class RobotArmEnv(gym.Env):
 
     SUCCESS_THRESHOLD = 2.0   # cm — gripper within 2cm of target = success
     MAX_COLLISIONS    = 10    # max allowed collisions before episode ends
-    MAX_STEPS         = 200
+    MAX_STEPS         = 500
 
     def __init__(self, render_mode=None):
         super().__init__()
@@ -135,9 +162,9 @@ class RobotArmEnv(gym.Env):
         )
 
         # ── Observation space ─────────────────────────────────────────
-        # [3 normalized angles] + [3 tip position] + [3 target position] + [6 IMU readings]
-        obs_low  = np.array([-1, -1, -1, -30, -30,  0, -30, -30,  0, -50, -50, -50, -10, -10, -10], dtype=np.float32)
-        obs_high = np.array([ 1,  1,  1,  30,  30, 30,  30,  30, 30,  50,  50,  50,  10,  10,  10], dtype=np.float32)
+        # [3 normalized angles] + [3 tip position] + [3 target position] + [6 IMU readings] + [3 camera readings]
+        obs_low  = np.array([-1,-1,-1, -30,-30,0, -30,-30,0, -50,-50,-50, -10,-10,-10, -30,-30,0], dtype=np.float32)
+        obs_high = np.array([ 1, 1, 1,  30,30,30,  30,30,30,  50,50,50,   10,10,10,    30,30,30], dtype=np.float32)
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         # Internal state
@@ -163,7 +190,8 @@ class RobotArmEnv(gym.Env):
         tip         = forward_kinematics(self._angles)
         angles_norm = self._normalize_angle(self._angles[:3])
         imu         = simulate_imu(self._angles, self._prev_angles)
-        return np.concatenate([angles_norm, tip, self._target, imu], dtype=np.float32)
+        cam_target  = simulate_camera_target(self._target)
+        return np.concatenate([angles_norm, tip, self._target, imu, cam_target], dtype=np.float32)
 
     def _get_joint_positions(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -332,8 +360,10 @@ class RobotArmEnv(gym.Env):
         self._steps += 1
         self._prev_angles = self._angles.copy()
 
-        new_angles_deg = self._denormalize_action(np.clip(action, -1.0, 1.0))
-        self._angles[:3] = np.clip(new_angles_deg, JOINT_MIN[:3], JOINT_MAX[:3])
+        # Apply action to update joint angles
+        # Clip the action to [-1, 1] and scale to MAX_DELTA degrees per step
+        delta = np.clip(action, -1.0, 1.0) * MAX_DELTA
+        self._angles[:3] = np.clip(self._angles[:3] + delta, JOINT_MIN[:3], JOINT_MAX[:3])
 
         p0, p1, p2, p3 = self._get_joint_positions()
         tip = p3
