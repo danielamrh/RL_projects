@@ -69,7 +69,7 @@ def run_teleop(env_id: str) -> None:
     cam_thread.start()
 
     # Open MuJoCo environment
-    env = gym.make(env_id, render_mode="human")
+    env = gym.make(env_id, render_mode="human", max_episode_steps=100_000)
     obs, _ = env.reset()
 
     # Get action space info
@@ -101,7 +101,6 @@ def run_teleop(env_id: str) -> None:
 
             if terminated or truncated:
                 obs, _ = env.reset()
-                continue
 
     finally:
         env.close()

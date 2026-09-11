@@ -16,14 +16,14 @@ import gymnasium_robotics
 from stable_baselines3 import SAC
 
 # ── Configuration ─────────────────────────────────────────────
-ENV_ID      = "HandReach-v3"
+ENV_ID      = "FetchReach-v4"
 MODEL_PATH  = "models/best_model/best_model"
 STEP_DELAY  = 0.02   # seconds between steps (50 fps)
 
 def run(n_episodes: int, model_path: str) -> None:
     print(f"Loading model from: {model_path}")
-    model = SAC.load(model_path)
     env   = gym.make(ENV_ID, render_mode="human")
+    model = SAC.load(model_path, env=env)
 
     print(f"Running {n_episodes} episodes — close window to stop.")
 

@@ -65,7 +65,7 @@ def _thumb_flex(landmarks: np.ndarray) -> float:
     mcp_bend = _joint_angle(landmarks[1], landmarks[2], landmarks[3])  # Winkel am MCP
     ip_bend  = _joint_angle(landmarks[2], landmarks[3], landmarks[4])  # Winkel am IP
     avg = (cmc_bend + mcp_bend + ip_bend) / 3.0
-    return float(np.clip(avg / (np.pi / 2), 0.0, 1.0))
+    return float(np.clip(avg / (np.pi / 3), 0.0, 1.0))
 
 
 def _thumb_rotation(landmarks: np.ndarray) -> float:
